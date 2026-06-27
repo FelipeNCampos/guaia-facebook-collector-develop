@@ -1,0 +1,10 @@
+selenium==4.31.0
+undetected-chromedriver==3.5.5
+setuptools==80.9.0
+beautifulsoup4==4.13.4
+psycopg[binary]==3.2.9
+pytest==8.4.0
+httpx==0.28.1
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+prometheus-client==0.21.1

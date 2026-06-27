@@ -1,0 +1,171 @@
+name: guaia-facebook-collector-${SUFFIX:-dev}
+
+x-app-environment: &app_environment
+  APP_ENV: ${APP_ENV?Defina APP_ENV no arquivo de ambiente}
+  API_HOST: ${API_HOST?Defina API_HOST no arquivo de ambiente}
+  API_PORT: ${API_PORT?Defina API_PORT no arquivo de ambiente}
+  DB_HOST: ${DB_HOST:-db}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_NAME: ${DB_NAME:-app}
+  DB_USER: ${DB_USER?Defina DB_USER no arquivo de ambiente}
+  DB_PASSWORD: ${DB_PASSWORD?Defina DB_PASSWORD no arquivo de ambiente}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    image: ${REGISTRY_IMAGE:-registry.gitlab.com/fakenews-tre-go/guaia-facebook-collector}/api:${IMAGE_TAG:-dev}
+    container_name: facebook_api_${SUFFIX}
+    restart: unless-stopped
+    environment:
+      <<: *app_environment
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+    ports:
+      - "${API_PORT_EXTERNAL:-8088}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  db:
+    image: postgres:16
+    container_name: facebook_postgres_${SUFFIX}
+    command: ["postgres", "-p", "${DB_PORT:-5432}"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER?Defina DB_USER no arquivo de ambiente}
+      POSTGRES_PASSWORD: ${DB_PASSWORD?Defina DB_PASSWORD no arquivo de ambiente}
+      POSTGRES_DB: ${DB_NAME:-${DB_USER?Defina DB_USER no arquivo de ambiente}}
+    ports:
+      - "${DB_PUBLISHED_PORT:-5432}:${DB_PORT:-5432}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER?Defina DB_USER no arquivo de ambiente} -p ${DB_PORT:-5432}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  google_runner:
+    build:
+      context: ..
+      dockerfile: google_runner/Dockerfile
+    image: ${REGISTRY_IMAGE:-registry.gitlab.com/fakenews-tre-go/guaia-facebook-collector}/google-runner:${IMAGE_TAG:-dev}
+    container_name: facebook_google_runner_${SUFFIX}
+    init: true
+    restart: unless-stopped
+    environment:
+      <<: *app_environment
+      GOOGLE_RUNNER_HEADLESS: ${GOOGLE_RUNNER_HEADLESS:-true}
+      GOOGLE_RUNNER_MAX_PAGES: ${GOOGLE_RUNNER_MAX_PAGES:-5}
+      GOOGLE_RUNNER_PAGE_LOAD_TIMEOUT: ${GOOGLE_RUNNER_PAGE_LOAD_TIMEOUT:-20}
+      GOOGLE_RUNNER_PAGE_DELAY_SECONDS: ${GOOGLE_RUNNER_PAGE_DELAY_SECONDS:-3}
+      GOOGLE_RUNNER_WAIT_TIMEOUT: ${GOOGLE_RUNNER_WAIT_TIMEOUT:-15}
+      FACEBOOK_RESULT_LIMIT: ${FACEBOOK_RESULT_LIMIT:-200}
+      GOOGLE_CAPTCHA_TIMEOUT_SECONDS: ${GOOGLE_CAPTCHA_TIMEOUT_SECONDS:-240}
+      GOOGLE_CHROME_PROFILE_DIRECTORY: ${GOOGLE_CHROME_PROFILE_DIRECTORY:-/var/lib/guaia/google-chrome-profile}
+      GOOGLE_CHROME_STARTUP_ATTEMPTS: ${GOOGLE_CHROME_STARTUP_ATTEMPTS:-3}
+      GOOGLE_2CAPTCHA_API_KEY: ${GOOGLE_2CAPTCHA_API_KEY:?Defina GOOGLE_2CAPTCHA_API_KEY no arquivo de ambiente}
+      MESSAGE_RETRY_MAX_ATTEMPTS: ${MESSAGE_RETRY_MAX_ATTEMPTS:-3}
+      MESSAGE_RETRY_BASE_DELAY_MS: ${MESSAGE_RETRY_BASE_DELAY_MS:-30000}
+      DIRECT_RUNNER_POLL_SECONDS: ${DIRECT_RUNNER_POLL_SECONDS:-5}
+      SERVICE_HTTP_HOST: ${SERVICE_HTTP_HOST:-0.0.0.0}
+      SERVICE_HTTP_PORT: ${GOOGLE_RUNNER_SERVICE_HTTP_PORT:-8091}
+    ports:
+      - "${GOOGLE_RUNNER_PORT_EXTERNAL:-8091}:${GOOGLE_RUNNER_SERVICE_HTTP_PORT:-8091}"
+    volumes:
+      - google_chrome_profile:/var/lib/guaia/google-chrome-profile
+    shm_size: "1gb"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.getenv(\"SERVICE_HTTP_PORT\", \"8091\")}/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  facebook_runner:
+    build:
+      context: ..
+      dockerfile: facebook_runner/Dockerfile
+    image: ${REGISTRY_IMAGE:-registry.gitlab.com/fakenews-tre-go/guaia-facebook-collector}/facebook-runner:${IMAGE_TAG:-dev}
+    init: true
+    restart: unless-stopped
+    environment:
+      <<: *app_environment
+      FACEBOOK_RUNNER_QUEUE: ${FACEBOOK_RUNNER_QUEUES:-facebook.perfil,facebook.video,facebook.reel,facebook.post,facebook.storie,facebook.foto,facebook.permalink}
+      FACEBOOK_RUNNER_TYPE: ${FACEBOOK_RUNNER_MULTI_TYPE:-all}
+      FACEBOOK_RUNNER_HEADLESS: ${FACEBOOK_RUNNER_HEADLESS:-true}
+      FACEBOOK_RUNNER_PAGE_LOAD_TIMEOUT: ${FACEBOOK_RUNNER_PAGE_LOAD_TIMEOUT:-20}
+      FACEBOOK_RUNNER_WAIT_TIMEOUT: ${FACEBOOK_RUNNER_WAIT_TIMEOUT:-15}
+      FACEBOOK_CHROME_PROFILE_DIRECTORY: ${FACEBOOK_CHROME_PROFILE_DIRECTORY:-}
+      FACEBOOK_RUNNER_PREFETCH_COUNT: ${FACEBOOK_RUNNER_PREFETCH_COUNT:-1}
+      FACEBOOK_EXTRACTOR_CONCURRENCY_LIMIT: ${FACEBOOK_EXTRACTOR_CONCURRENCY_LIMIT:-2}
+      FACEBOOK_EXTRACTOR_SLOT_WAIT_SECONDS: ${FACEBOOK_EXTRACTOR_SLOT_WAIT_SECONDS:-120}
+      FACEBOOK_DOWNLOAD_MEDIA: ${FACEBOOK_DOWNLOAD_MEDIA:-false}
+      FACEBOOK_MEDIA_DOWNLOAD_TIMEOUT_SECONDS: ${FACEBOOK_MEDIA_DOWNLOAD_TIMEOUT_SECONDS:-60}
+      FACEBOOK_MEDIA_MAX_BYTES: ${FACEBOOK_MEDIA_MAX_BYTES:-262144000}
+      FACEBOOK_FETCH_COMMENTS: ${FACEBOOK_FETCH_COMMENTS:-false}
+      FACEBOOK_COMMENTS_PER_POST: ${FACEBOOK_COMMENTS_PER_POST:-50}
+      GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      MESSAGE_RETRY_MAX_ATTEMPTS: ${MESSAGE_RETRY_MAX_ATTEMPTS:-3}
+      MESSAGE_RETRY_BASE_DELAY_MS: ${MESSAGE_RETRY_BASE_DELAY_MS:-30000}
+      DIRECT_RUNNER_POLL_SECONDS: ${DIRECT_RUNNER_POLL_SECONDS:-5}
+      SERVICE_HTTP_HOST: ${SERVICE_HTTP_HOST:-0.0.0.0}
+      SERVICE_HTTP_PORT: ${FACEBOOK_RUNNER_SERVICE_HTTP_PORT:-8101}
+    expose:
+      - "${FACEBOOK_RUNNER_SERVICE_HTTP_PORT:-8101}"
+    shm_size: "1gb"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.getenv(\"SERVICE_HTTP_PORT\", \"8101\")}/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  facebook_feeder:
+    build:
+      context: ..
+      dockerfile: feeder/Dockerfile
+    image: ${REGISTRY_IMAGE:-registry.gitlab.com/fakenews-tre-go/guaia-facebook-collector}/feeder:${IMAGE_TAG:-dev}
+    container_name: facebook_feeder_${SUFFIX}
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FACEBOOK_API_BASE_URL: ${FACEBOOK_API_BASE_URL:-http://api:8080}
+      GUAIA_CONFIG_PATH: ${GUAIA_CONFIG_PATH:-/workspace/feeder/config.yml}
+      FACEBOOK_FEEDER_QUERY_SOURCE: ${FACEBOOK_FEEDER_QUERY_SOURCE:-5}
+      FACEBOOK_FEEDER_SOURCE_TYPE: ${FACEBOOK_FEEDER_SOURCE_TYPE:-3}
+      FACEBOOK_FEEDER_TARGET_TYPES: ${FACEBOOK_FEEDER_TARGET_TYPES:-1,5}
+      FACEBOOK_FEEDER_POLL_INTERVAL: ${FACEBOOK_FEEDER_POLL_INTERVAL:-30}
+      FACEBOOK_FEEDER_WAIT_TIMEOUT_SECONDS: ${FACEBOOK_FEEDER_WAIT_TIMEOUT_SECONDS:-3600}
+      FACEBOOK_FEEDER_WAIT_POLL_SECONDS: ${FACEBOOK_FEEDER_WAIT_POLL_SECONDS:-20}
+      FACEBOOK_FEEDER_REQUEST_RETRY_LIMIT: ${FACEBOOK_FEEDER_REQUEST_RETRY_LIMIT:-3}
+      FACEBOOK_FEEDER_HTTP_TIMEOUT_SECONDS: ${FACEBOOK_FEEDER_HTTP_TIMEOUT_SECONDS:-15}
+    volumes:
+      - ../config.yml:/workspace/feeder/config.yml:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  google_chrome_profile:
+
+networks:
+  default:
+    name: facebook_network_${SUFFIX}

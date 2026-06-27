@@ -1,0 +1,3 @@
+ALTER TABLE requests
+ADD COLUMN IF NOT EXISTS error TEXT;
+
