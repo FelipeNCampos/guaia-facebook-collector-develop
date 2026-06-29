@@ -259,13 +259,17 @@ O captcha do Google pode ser resolvido por 2Captcha quando `GOOGLE_2CAPTCHA_API_
 
 ## Arquivamento de midias
 
-O `facebook_runner` pode baixar midias diretas e enviar para o Google Drive quando `FACEBOOK_DOWNLOAD_MEDIA=true` e as variaveis de Drive estiverem configuradas. O arquivamento e opcional: se a midia nao existir, se o Drive nao estiver configurado ou se o download falhar, o registro continua sendo persistido sem `drive_file_id` e `drive_url`.
+O `facebook_runner` baixa midias diretas quando `FACEBOOK_DOWNLOAD_MEDIA=true`. O destino e definido por `FACEBOOK_MEDIA_STORAGE`: em `auto`, `APP_ENV=production` salva no Google Drive usando as credenciais configuradas, enquanto ambientes de desenvolvimento, teste ou locais salvam em `FACEBOOK_MEDIA_LOCAL_PATH`. Tambem e possivel forcar `FACEBOOK_MEDIA_STORAGE=local` ou `FACEBOOK_MEDIA_STORAGE=google_drive`. A URL da midia pode vir dos JSONs embutidos do Facebook ou, quando habilitado, de metas `og:*` e tags `video`/`img` no DOM renderizado.
 
 Variaveis relevantes:
 
 | Variavel | Funcao |
 | --- | --- |
-| `FACEBOOK_DOWNLOAD_MEDIA` | Habilita ou desabilita download e envio de midias. |
+| `FACEBOOK_DOWNLOAD_MEDIA` | Habilita ou desabilita download e arquivamento de midias. |
+| `FACEBOOK_MEDIA_STORAGE` | Define o destino das midias: `auto`, `local` ou `google_drive`. |
+| `FACEBOOK_MEDIA_COLLECT_FROM_DOM` | Habilita fallback de coleta de midia no DOM renderizado. |
+| `FACEBOOK_MEDIA_PREFER_VIDEO` | Prioriza URLs de video quando houver mais de uma midia candidata. |
+| `FACEBOOK_MEDIA_LOCAL_PATH` | Pasta base para arquivamento local em dev/test ou quando `FACEBOOK_MEDIA_STORAGE=local`. |
 | `FACEBOOK_MEDIA_DOWNLOAD_TIMEOUT_SECONDS` | Tempo maximo de download por midia. |
 | `FACEBOOK_MEDIA_MAX_BYTES` | Tamanho maximo aceito para uma midia. |
 | `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` | Credencial da conta de servico em JSON. |

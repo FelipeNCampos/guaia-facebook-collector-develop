@@ -200,6 +200,50 @@ def extract_media_url_from_data(data) -> str:
     return ""
 
 
+def extract_media_url_from_dom(page_source: str, prefer_video: bool = True) -> tuple[str, str]:
+    soup = BeautifulSoup(page_source, "html.parser")
+
+    video_meta_selectors = (
+        'meta[property="og:video"][content]',
+        'meta[property="og:video:url"][content]',
+    )
+    image_meta_selectors = (
+        'meta[property="og:image"][content]',
+    )
+
+    def first_candidate(selectors: tuple[str, ...], attribute: str, media_type: str) -> tuple[str, str]:
+        for selector in selectors:
+            for element in soup.select(selector):
+                media_url = str(element.get(attribute) or "").strip()
+                if is_candidate_media_url(media_url):
+                    return media_url, media_type
+        return "", ""
+
+    meta_groups = (
+        (video_meta_selectors, "video"),
+        (image_meta_selectors, "imagem"),
+    )
+    tag_groups = (
+        (("video[src]",), "video"),
+        (("img[src]",), "imagem"),
+    )
+    if not prefer_video:
+        meta_groups = tuple(reversed(meta_groups))
+        tag_groups = tuple(reversed(tag_groups))
+
+    for selectors, media_type in meta_groups:
+        media_url, found_type = first_candidate(selectors, "content", media_type)
+        if media_url:
+            return media_url, found_type
+
+    for selectors, media_type in tag_groups:
+        media_url, found_type = first_candidate(selectors, "src", media_type)
+        if media_url:
+            return media_url, found_type
+
+    return "", ""
+
+
 def format_timestamp(value):
     if value in (None, ""):
         return ""
@@ -646,7 +690,15 @@ def extract_facebook_profile_data(page_source: str, source_url: str, current_url
     return record
 
 
-def extract_facebook_publication_data(page_source: str, source_url: str, runner_type: str, perfil_slug: str = "", current_url: str = "") -> dict:
+def extract_facebook_publication_data(
+    page_source: str,
+    source_url: str,
+    runner_type: str,
+    perfil_slug: str = "",
+    current_url: str = "",
+    collect_media_from_dom: bool = True,
+    prefer_video: bool = True,
+) -> dict:
     record = build_content_record(source_url, runner_type, perfil_slug=perfil_slug)
     if is_facebook_login_required_page(page_source, current_url=current_url):
         record["status"] = "failed"
@@ -672,6 +724,12 @@ def extract_facebook_publication_data(page_source: str, source_url: str, runner_
             record = relaxed_record
         else:
             record = scan_publication_data(require_content_match=False, scanned_record=record)
+
+    if collect_media_from_dom and not record.get("media_url"):
+        dom_url, dom_type = extract_media_url_from_dom(page_source, prefer_video=prefer_video)
+        if dom_url:
+            record["media_url"] = dom_url
+            record["media_type"] = dom_type or infer_media_type(dom_url)
 
     if not has_facebook_publication_details(record):
         record["status"] = "failed"
@@ -752,13 +810,21 @@ class FacebookExtractor:
             if runner_type == "perfil":
                 return extract_facebook_profile_data(driver.page_source, fonte, current_url=driver.current_url)
 
-            return extract_facebook_publication_data(
+            record = extract_facebook_publication_data(
                 driver.page_source,
                 fonte,
                 runner_type=runner_type,
                 perfil_slug=perfil_slug,
                 current_url=driver.current_url,
+                collect_media_from_dom=self.settings.facebook_media_collect_from_dom,
+                prefer_video=self.settings.facebook_media_prefer_video,
             )
+            if self.settings.facebook_media_collect_from_dom and not record.get("media_url"):
+                live_url, live_type = self._extract_media_from_live_dom(driver, runner_type)
+                if live_url:
+                    record["media_url"] = live_url
+                    record["media_type"] = live_type or infer_media_type(live_url)
+            return record
         finally:
             try:
                 driver.quit()
@@ -823,3 +889,31 @@ class FacebookExtractor:
             driver.execute_script("window.stop();")
         except Exception:
             pass
+
+    def _extract_media_url_from_live_dom(self, driver, runner_type: str) -> str:
+        media_url, _ = self._extract_media_from_live_dom(driver, runner_type)
+        return media_url
+
+    def _extract_media_from_live_dom(self, driver, runner_type: str) -> tuple[str, str]:
+        search_order = []
+        if self.settings.facebook_media_prefer_video or runner_type in ("video", "reel"):
+            search_order.append((By.TAG_NAME, "video", "src", "video"))
+            search_order.append((By.CSS_SELECTOR, "img[src]", "src", "imagem"))
+        else:
+            search_order.append((By.CSS_SELECTOR, "img[src]", "src", "imagem"))
+            search_order.append((By.TAG_NAME, "video", "src", "video"))
+
+        for by, selector, attribute, media_type in search_order:
+            try:
+                elements = driver.find_elements(by, selector)
+            except WebDriverException:
+                continue
+            for element in elements:
+                try:
+                    media_url = str(element.get_attribute(attribute) or "").strip()
+                except WebDriverException:
+                    continue
+                if is_candidate_media_url(media_url):
+                    return media_url, media_type
+
+        return "", ""

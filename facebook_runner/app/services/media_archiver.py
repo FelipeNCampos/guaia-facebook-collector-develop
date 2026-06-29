@@ -1,6 +1,7 @@
 import mimetypes
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -9,6 +10,10 @@ from app.services import google_drive
 from app_shared.config import Settings
 
 MEDIA_REFERER = "https://www.facebook.com/"
+PRODUCTION_ENVS = {"prod", "production"}
+STORAGE_AUTO = "auto"
+STORAGE_GOOGLE_DRIVE = "google_drive"
+STORAGE_LOCAL = "local"
 
 
 def infer_media_mimetype(url: str, content_type: str = "") -> str:
@@ -68,6 +73,13 @@ class FacebookMediaArchiver:
         if not media_url:
             return record
 
+        storage = self._storage_mode()
+        if storage == STORAGE_LOCAL:
+            if not self.settings.facebook_media_local_path:
+                self._warn("facebook_media_local_path_not_configured", media_url=media_url)
+                return record
+            return self._archive_locally(record, runner_type)
+
         if not google_drive.is_configured():
             self._warn("facebook_media_drive_not_configured", media_url=media_url)
             return record
@@ -88,6 +100,38 @@ class FacebookMediaArchiver:
         record["drive_file_id"] = file_id
         record["drive_url"] = drive_url
         return record
+
+    def _archive_locally(self, record: dict, runner_type: str) -> dict:
+        media_url = str(record.get("media_url") or "").strip()
+        try:
+            data, mimetype = self._download(media_url)
+            filename = media_filename(runner_type, record.get("fonte") or media_url, mimetype)
+            base_path = Path(self.settings.facebook_media_local_path)
+            base_path.mkdir(parents=True, exist_ok=True)
+            local_path = base_path / filename
+            local_path.write_bytes(data)
+        except Exception as exc:
+            self._warn("facebook_media_local_archive_failed", media_url=media_url, error=str(exc))
+            return record
+
+        record["drive_file_id"] = ""
+        record["drive_url"] = f"file://{local_path}"
+        return record
+
+    def _storage_mode(self) -> str:
+        requested = str(getattr(self.settings, "facebook_media_storage", "") or STORAGE_AUTO).strip().lower()
+        requested = requested.replace("-", "_")
+        if requested in {"drive", "google", "gdrive"}:
+            return STORAGE_GOOGLE_DRIVE
+        if requested in {STORAGE_GOOGLE_DRIVE, STORAGE_LOCAL}:
+            return requested
+        if requested not in {"", STORAGE_AUTO}:
+            self._warn("facebook_media_storage_invalid", storage=requested)
+
+        app_env = str(getattr(self.settings, "app_env", "") or "").strip().lower()
+        if app_env in PRODUCTION_ENVS:
+            return STORAGE_GOOGLE_DRIVE
+        return STORAGE_LOCAL
 
     def _download(self, media_url: str) -> tuple[bytes, str]:
         headers = {

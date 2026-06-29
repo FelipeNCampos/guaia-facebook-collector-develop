@@ -37,6 +37,9 @@ class Settings:
     facebook_extractor_concurrency_limit: int
     facebook_extractor_slot_wait_seconds: int
     facebook_download_media: bool
+    facebook_media_local_path: str
+    facebook_media_collect_from_dom: bool
+    facebook_media_prefer_video: bool
     facebook_media_download_timeout_seconds: int
     facebook_media_max_bytes: int
     facebook_fetch_comments: bool
@@ -47,6 +50,7 @@ class Settings:
     service_http_port: int
     log_level: str
     migrations_path: Path
+    facebook_media_storage: str = "auto"
 
     @property
     def google_chrome_startup_attempts(self) -> int:
@@ -122,9 +126,12 @@ def get_settings() -> Settings:
         facebook_runner_prefetch_count=int(os.getenv("FACEBOOK_RUNNER_PREFETCH_COUNT", "1")),
         facebook_extractor_concurrency_limit=int(os.getenv("FACEBOOK_EXTRACTOR_CONCURRENCY_LIMIT", "4")),
         facebook_extractor_slot_wait_seconds=int(os.getenv("FACEBOOK_EXTRACTOR_SLOT_WAIT_SECONDS", "120")),
-        facebook_download_media=_parse_bool(os.getenv("FACEBOOK_DOWNLOAD_MEDIA"), False),
-        facebook_media_download_timeout_seconds=int(os.getenv("FACEBOOK_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "60")),
-        facebook_media_max_bytes=int(os.getenv("FACEBOOK_MEDIA_MAX_BYTES", str(250 * 1024 * 1024))),
+        facebook_download_media=_parse_bool(os.getenv("FACEBOOK_DOWNLOAD_MEDIA"), True),
+        facebook_media_local_path=os.getenv("FACEBOOK_MEDIA_LOCAL_PATH", ""),
+        facebook_media_collect_from_dom=_parse_bool(os.getenv("FACEBOOK_MEDIA_COLLECT_FROM_DOM"), True),
+        facebook_media_prefer_video=_parse_bool(os.getenv("FACEBOOK_MEDIA_PREFER_VIDEO"), True),
+        facebook_media_download_timeout_seconds=int(os.getenv("FACEBOOK_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "30")),
+        facebook_media_max_bytes=int(os.getenv("FACEBOOK_MEDIA_MAX_BYTES", str(50 * 1024 * 1024))),
         facebook_fetch_comments=_parse_bool(os.getenv("FACEBOOK_FETCH_COMMENTS"), False),
         facebook_comments_per_post=int(os.getenv("FACEBOOK_COMMENTS_PER_POST", "50")),
         message_retry_max_attempts=int(os.getenv("MESSAGE_RETRY_MAX_ATTEMPTS", "3")),
@@ -133,4 +140,5 @@ def get_settings() -> Settings:
         service_http_port=int(os.getenv("SERVICE_HTTP_PORT", "8090")),
         log_level=_required_env("LOG_LEVEL"),
         migrations_path=migrations_path,
+        facebook_media_storage=os.getenv("FACEBOOK_MEDIA_STORAGE", "auto"),
     )
